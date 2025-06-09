@@ -1,0 +1,136 @@
+{
+  "size": 0,
+  "sort": [
+    {
+      "_score": {
+        "order": "desc"
+      }
+    }
+  ],
+  "_source": {
+    "includes": [
+      "beats_state.beat.host"
+    ]
+  },
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "bool": {
+            "must": [
+              {
+                "bool": {
+                  "must_not": {
+                    "bool": {
+                      "should": [
+                        {
+                          "query_string": {
+                            "fields": [
+                              "beats_state.beat.name.keyword"
+                            ],
+                            "query": "CS51*"
+                          }
+                        }
+                      ],
+                      "minimum_should_match": 1
+                    }
+                  }
+                }
+              },
+              {
+                "bool": {
+                  "must_not": {
+                    "bool": {
+                      "should": [
+                        {
+                          "query_string": {
+                            "fields": [
+                              "beats_state.beat.name.keyword"
+                            ],
+                            "query": "ip-*"
+                          }
+                        }
+                      ],
+                      "minimum_should_match": 1
+                    }
+                  }
+                }
+              },
+              {
+                "bool": {
+                  "must_not": {
+                    "bool": {
+                      "should": [
+                        {
+                          "query_string": {
+                            "fields": [
+                              "beats_state.beat.name.keyword"
+                            ],
+                            "query": "CW51-*"
+                          }
+                        }
+                      ],
+                      "minimum_should_match": 1
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "filter": [
+        {
+          "range": {
+            "timestamp": {
+              "gte": "now-5d",
+              "lt": "now"
+            }
+          }
+        },
+        {
+          "bool": {
+            "should": [
+              {
+                "match_phrase": {
+                  "beats_state.beat.type": "metricbeat"
+                }
+              },
+              {
+                "match_phrase": {
+                  "beats_state.beat.type": "filebeat"
+                }
+              }
+            ],
+            "minimum_should_match": 1
+          }
+        },
+        {
+          "match_phrase": {
+            "status": "down"
+          }
+        },
+        {
+          "match_phrase": {
+            "beats_state.state.host.os.platform": "%s"
+          }
+        },
+        {
+          "exists": {
+            "field": "timestamp"
+          }
+        }
+      ],
+      "should": [],
+      "must_not": []
+    }
+  },
+  "aggs": {
+    "uhosts": {
+      "terms": {
+        "field": "beats_state.beat.name.keyword",
+        "size": 2000
+      }
+    }
+  }
+}
