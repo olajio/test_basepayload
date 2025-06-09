@@ -1,0 +1,26 @@
+- name: Start Metricbeat/Filebeat service
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Gather service facts
+      service_facts:
+
+    - name: Start and enable metricbeat/filebeat if not already running
+      block:
+        - name: Start service if not running
+          service:
+            name: "{{ item }}"
+            state: started
+          when: >
+            (item ~ '.service') not in ansible_facts.services or
+            ansible_facts.services[item ~ '.service'].state != 'running'
+
+        - name: Enable service to start on boot
+          service:
+            name: "{{ item }}"
+            enabled: yes
+      loop:
+        - metricbeat
+        - filebeat
