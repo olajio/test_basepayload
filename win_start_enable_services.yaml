@@ -1,0 +1,19 @@
+- name: Windows Service
+  hosts: all
+  tasks:
+    - name: Start Metricbeat and Filebeat Agents
+      ansible.windows.win_service:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - metricbeat
+        - filebeat
+      register: results
+
+    - name: Enable Metricbeat and Filebeat to start on boot
+      ansible.windows.win_service:
+        name: "{{ item }}"
+        start_mode: auto
+      loop:
+        - metricbeat
+        - filebeat
