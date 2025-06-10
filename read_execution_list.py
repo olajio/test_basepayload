@@ -1,4 +1,5 @@
 import json
+# https://ghe.hedgeserv.net/DevOps/Config/blob/master/aws/aws_stop_exclusions.json
 
 # Load JSON file
 with open('execution_list.json', 'r') as file:
