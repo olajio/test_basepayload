@@ -1,0 +1,418 @@
+{
+  "trigger": {
+    "schedule": {
+      "cron": [
+        "0 */2 * ? * MON-FRI",
+        "0 */5 0-3 ? * SAT",
+        "0 */5 17-23 ? * SUN"
+      ]
+    }
+  },
+  "input": {
+    "chain": {
+      "inputs": [
+        {
+          "groups": {
+            "search": {
+              "request": {
+                "search_type": "query_then_fetch",
+                "indices": [
+                  "sdp_amdb"
+                ],
+                "rest_total_hits_as_int": true,
+                "body": {
+                  "size": 0,
+                  "query": {
+                    "bool": {
+                      "filter": [
+                        {
+                          "bool": {
+                            "must_not": {
+                              "bool": {
+                                "filter": [
+                                  {
+                                    "bool": {
+                                      "should": [
+                                        {
+                                          "range": {
+                                            "maintanace.utc_end": {
+                                              "gt": "now"
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "range": {
+                                            "maintanace.utc_start": {
+                                              "lt": "now"
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "minimum_should_match": 2
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "term": {
+                            "group": "{{ ctx.metadata.event_type }}"
+                          }
+                        },
+                        {
+                          "term": {
+                            "alert_status": "enabled"
+                          }
+                        },
+                        {
+                          "term": {
+                            "type": "server"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "aggs": {
+                    "hosts": {
+                      "terms": {
+                        "field": "hostname.keyword",
+                        "size": 5000
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "groups_hosts": {
+            "transform": {
+              "script": {
+                "source": """
+          // flatten the list of hostnames from sdp_amdb to use in the errors input
+          return ctx.payload.groups.aggregations.hosts.buckets.stream().map(b -> b.key).collect(Collectors.toList());""",
+                "lang": "painless"
+              }
+            }
+          }
+        },
+        {
+          "errors": {
+            "search": {
+              "request": {
+                "search_type": "query_then_fetch",
+                "indices": [
+                  "prod:filebeat-*"
+                ],
+                "rest_total_hits_as_int": true,
+                "template": {
+                  "source": """
+                    {
+                      "size": 0,
+                      "query": {
+                        "bool": {
+                          "filter": [
+                                {
+                                  "terms": {
+                                    "_tier": [
+                                      "data_hot",
+                                      "data_content"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "terms": {
+                                    "host.hostname": {{#toJson}}ctx.payload.groups_hosts._value{{/toJson}}
+                                  }
+                                },
+                                {
+                                  "range": {
+                                    "@timestamp": {
+                                      "gt": "now-{{ ctx.metadata.timeRangeValue }}{{ ctx.metadata.timeRangeUnit }}"
+                                    }
+                                  }
+                                },
+                                {
+                                  "exists": {
+                                    "field": "host.hostname"
+                                  }
+                                },
+                                {
+                                  "term": {
+                                    "log.file.path": "C:\\HedgeServ\\Logs\\HS_AWS_Auth_log.json"
+                                  }
+                                },
+                                {
+                                  "term": {
+                                    "service.name": "HS AWS Auth"
+                                  }
+                                },
+                                {
+                                  "match_phrase": {
+                                    "message": "Successfully updated the credentials"
+                                  }
+                                }
+                              ],
+                              "must_not": [
+                                {
+                                  "exists": {
+                                    "field": "cloud.account.id"
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          "aggs": {
+                            "hosts": {
+                              "terms": {
+                                "field": "host.hostname",
+                                "size": 5000
+                              }
+                            }
+                          }
+                        }
+                    """,
+                  "lang": "mustache"
+                }
+              }
+            }
+          }
+        },
+        {
+          "hosts": {
+            "transform": {
+              "script": {
+                "source": """
+                    // Get all hosts from sdp_amdb
+                    def allHosts = ctx.payload.groups.aggregations.hosts.buckets.stream().map(b -> b.key).collect(Collectors.toSet());
+
+                    // Get hosts that reported "Successfully updated the credentials" and their doc counts
+                    def successfulUpdateCounts = new HashMap(); 
+                    for (bucket in ctx.payload.errors.aggregations.hosts.buckets) {
+                      successfulUpdateCounts.put(bucket.key, (long) bucket.successful_updates.doc_count);
+                    }
+
+                    // Identify hosts that have less than 2 successful updates OR are missing from the errors payload
+                    List hostsToAlert = new ArrayList();
+                    for (host in allHosts) {
+                      // If the host is not in successfulUpdateCounts (meaning 0 messages) or the count is less than 2
+                      if (!successfulUpdateCounts.containsKey(host) || successfulUpdateCounts.get(host) < 2) {
+                        hostsToAlert.add(host);
+                      }
+                    }
+                    return hostsToAlert;
+                    """,
+                "lang": "painless"
+              }
+            }
+          }
+        },
+        {
+          "open_tickets": {
+            "search": {
+              "request": {
+                "search_type": "query_then_fetch",
+                "indices": [
+                  "sdp_tickets"
+                ],
+                "rest_total_hits_as_int": true,
+                "template": {
+                  "source": """
+                    {
+                      "size": 5000,
+                      "query": {
+                        "bool": {
+                          "filter": [
+                                {
+                                  "terms": {
+                                    "host.hostname": {{#toJson}}ctx.payload.hosts._value{{/toJson}}
+                                  }
+                                },
+                                {
+                                  "term": {
+                                    "status": "open"
+                                  }
+                                },
+                                {
+                                  "term": {
+                                    "event_type": "{{ ctx.metadata.event_type }}"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                    """,
+                  "lang": "mustache"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "condition": {
+    "script": {
+      "source": """
+                // Alert if there are any hosts that need alerting (less than 2 successful updates)
+                return ctx.payload.hosts._value.size() > 0;
+            """,
+      "lang": "painless"
+    }
+  },
+  "actions": {
+    "comment_tickets": {
+      "condition": {
+        "script": {
+          "source": "ctx.payload.to_comment.size() > 0",
+          "lang": "painless"
+        }
+      },
+      "foreach": "ctx.payload.to_comment",
+      "max_iterations": 5000,
+      "webhook": {
+        "scheme": "https",
+        "host": "elk-support.hedgeserv.com",
+        "port": 443,
+        "method": "post",
+        "path": "/api/v3/requests/{{ ctx.payload.ticket_id }}/notes",
+        "params": {
+          "input_data": """{
+        "note": {
+          "description": "<font color=red>New alert came at:</font> {{ ctx.trigger.triggered_time }}. Host: {{ ctx.payload.key }} - Successful credential updates < 2</font>",
+          "show_to_requester": true,
+          "notify_technician": true,
+          "mark_first_response": false,
+          "add_to_linked_requests": true
+        }
+      }"""
+        },
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "technician_key": "CCC3E79E-EB24-44CE-95ED-55830A5652DB"
+        },
+        "connection_timeout_in_millis": 30000,
+        "read_timeout_millis": 30000
+      }
+    },
+    "open_tickets": {
+      "condition": {
+        "script": {
+          "source": "ctx.payload.to_open.size() > 0",
+          "lang": "painless"
+        }
+      },
+      "foreach": "ctx.payload.to_open",
+      "max_iterations": 1,
+      "webhook": {
+        "scheme": "https",
+        "host": "elk-support.hedgeserv.com",
+        "port": 443,
+        "method": "post",
+        "path": "/api/v3/requests",
+        "params": {
+          "input_data": """{
+          "request": {
+            "subject": "TEST PLEASE IGNORE - {{ ctx.metadata.amdb_name }} - {{ ctx.payload._value }}",
+            "description": "<h3>{{ ctx.metadata.amdb_name }}</h3><p>Monitor name: {{ ctx.payload._value }}</p><p>Threshold: {{ ctx.metadata.threshold }}</p><p><a href='{{ctx.metadata.amdb_link}}'><font color=blue>AMDB Link</font></a></p><p><a href='{{ctx.metadata.discover_link}}'>Dicover Link</a></p>",
+            "requester": {
+               "name": "service-elastic"
+            },
+            "template": {
+               "name": "Elastic Search Alerts"
+            },
+            "service_category": {
+               "name": "Report an Incident"
+            },
+            "priority": {
+               "name": "{{ ctx.metadata.ticket_priority }}"
+            },
+            "group": {
+               "name": "{{ ctx.metadata.ticket_group }}"
+            },
+            "status": {
+               "name": "Onhold"
+            },
+            "technician": {
+               "name": "Ola Ola"
+            },
+            "udf_fields": {
+               "udf_sline_49837": "{{ ctx.trigger.triggered_time }}",
+               "udf_sline_53701": "",
+               "udf_sline_49808": "{{ ctx.metadata.event_type }}",
+               "udf_sline_49805": "{{ ctx.payload._value }}",
+               "udf_sline_53703": "{{ ctx.metadata.agg_threshold }}",
+               "udf_sline_55201": ""
+            },
+            "category": {
+               "name": "Elastic"
+            },
+            "subcategory": {
+               "name": "{{ ctx.metadata.ticket_subcategory }}"
+            },
+            "item": {
+               "name": "{{ ctx.metadata.ticket_item }}"
+            }
+          }
+        }"""
+        },
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "technician_key": "CCC3E79E-EB24-44CE-95ED-55830A5652DB"
+        },
+        "connection_timeout_in_millis": 30000,
+        "read_timeout_millis": 30000
+      }
+    }
+  },
+  "metadata": {
+    "discover_link": "https://287d86a4b1184182b340bd5074cdfd7e.us-east-1.aws.found.io:9243/s/information-technology/app/r/s/MD29I",
+    "amdb_name": "13544 - HS AWS Auth Successfully updated the credentials < 2",
+    "ticket_priority": "2 - High",
+    "threshold": "Less than 2 entries of: 'Successfully updated the credentials' in the last 30 minutes",
+    "amdb_link": "https://hedgeservcorp.sharepoint.com/sites/GlobalTechnology/AMDB/SitePages/13544.aspx",
+    "ticket_item": "Service Down",
+    "timeRangeUnit": "m",
+    "event_type": "13544",
+    "ticket_group2": "Service Desk Operations",
+    "timeRangeValue": 30,
+    "ticket_group": "Monitoring and Analytics - Testing",
+    "ticket_subcategory": "Server Availability",
+    "id": "sdp_13544"
+  },
+  "transform": {
+    "script": {
+      "source": """
+                // grab hostnames with open tickets and remember their IDs in a map
+                Map opened = ctx.payload.open_tickets.hits.hits.stream().collect(Collectors.toMap(h -> h._source.host.hostname, h -> h._source.ticket_id));
+
+                // store two lists of host buckets
+                List to_open = [];
+                List to_comment = [];
+
+                for (host in ctx.payload.hosts._value) { // ctx.payload.hosts._value now contains only hosts that meet the alert condition
+                  if (opened.containsKey(host)) {
+                    // annotate hosts that need to be commented with ticket ID
+                    Map h = new HashMap();
+                    h.put("key", host);
+                    h.put("ticket_id", opened[host]);
+                    to_comment.add(h);
+                  } else {
+                    // either no ticket for the host, or a closed one, open a new one
+                    to_open.add(host);
+                  }
+                }
+                // replace payload with our two lists
+                return [
+                  'to_open': to_open,
+                  'to_comment': to_comment
+                ];
+            """,
+      "lang": "painless"
+    }
+  }
+}
