@@ -1,0 +1,10 @@
+POST /sdp_amdb/_doc/ES01-ESXCB300-DS04
+{
+  "hostname": "ES01-ESXCB300-DS04",
+  "group": [
+    "11115"
+  ],
+  "app_code": "",
+  "alert_status": "enabled",
+  "type": "datastore"
+}
