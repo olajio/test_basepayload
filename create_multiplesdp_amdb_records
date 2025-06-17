@@ -8,3 +8,13 @@ POST /sdp_amdb/_doc/ES01-ESXCB300-DS04
   "alert_status": "enabled",
   "type": "datastore"
 }
+
+
+
+POST /_bulk
+{"index": {"_index": "sdp_amdb", "_id": "ES01-ESXCB300-DS04"}}
+{"hostname": "ES01-ESXCB300-DS04", "group": ["11115"], "app_code": "", "alert_status": "enabled", "type": "datastore"}
+{"index": {"_index": "sdp_amdb", "_id": "ES02-WEBA100-SQL01"}}
+{"hostname": "ES02-WEBA100-SQL01", "group": ["11115", "22220"], "app_code": "WEBAPP", "alert_status": "enabled", "type": "database"}
+{"index": {"_index": "sdp_amdb", "_id": "ES03-APPC300-APP05"}}
+{"hostname": "ES03-APPC300-APP05", "group": ["33335"], "app_code": "CRM", "alert_status": "disabled", "type": "application"}
