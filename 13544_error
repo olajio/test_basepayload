@@ -15,7 +15,7 @@
                     // Get hosts that reported "Successfully updated the credentials" and their doc counts
                     Map<String, Long> successfulUpdateCounts = new HashMap<>();
                     for (bucket in ctx.payload.errors.aggregations.hosts.buckets) {
-                      successfulUpdateCounts.put(bucket.key, bucket.doc_count);
+                      successfulUpdateCounts.put(bucket.key, (long) bucket.successful_updates.doc_count);
                     }
 
                     // Identify hosts that have less than 2 successful updates OR are missing from the errors payload
@@ -49,7 +49,7 @@
                     // Get hosts that reported "Successfully updated the credentials" and their doc counts
                     Map<String, Long> successfulUpdateCounts = new HashMap<>();
                     for (bucket in ctx.payload.errors.aggregations.hosts.buckets) {
-                      successfulUpdateCounts.put(bucket.key, bucket.doc_count);
+                      successfulUpdateCounts.put(bucket.key, (long) bucket.successful_updates.doc_count);
                     }
 
                     // Identify hosts that have less than 2 successful updates OR are missing from the errors payload
