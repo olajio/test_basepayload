@@ -1,77 +1,335 @@
 {
-  "error": {
-    "root_cause": [
-      {
-        "type": "script_exception",
-        "reason": "compile error",
-        "script_stack": [
-          "...                Map<String, Long> successfulUpdateC ...",
-          "                             ^---- HERE"
-        ],
-        "script": """
-                    // Get all hosts from sdp_amdb
-                    def allHosts = ctx.payload.groups.aggregations.hosts.buckets.stream().map(b -> b.key).collect(Collectors.toSet());
-
-                    // Get hosts that reported "Successfully updated the credentials" and their doc counts
-                    Map<String, Long> successfulUpdateCounts = new HashMap<>();
-                    for (bucket in ctx.payload.errors.aggregations.hosts.buckets) {
-                      successfulUpdateCounts.put(bucket.key, (long) bucket.successful_updates.doc_count);
-                    }
-
-                    // Identify hosts that have less than 2 successful updates OR are missing from the errors payload
-                    List<String> hostsToAlert = new ArrayList<>();
-                    for (host in allHosts) {
-                      // If the host is not in successfulUpdateCounts (meaning 0 messages) or the count is less than 2
-                      if (!successfulUpdateCounts.containsKey(host) || successfulUpdateCounts.get(host) < 2) {
-                        hostsToAlert.add(host);
-                      }
-                    }
-                    return hostsToAlert;
-                    """,
-        "lang": "painless",
-        "position": {
-          "offset": 325,
-          "start": 300,
-          "end": 350
+  "_id": "_inlined__517a732f-ff5f-4ab1-8571-2e892f23c5e7-2025-06-17T17:54:21.647746629Z",
+  "watch_record": {
+    "watch_id": "_inlined_",
+    "node": "5wYMCLOrTHOpkSUilWqLpA",
+    "state": "failed",
+    "@timestamp": "2025-06-17T17:54:21.647730506Z",
+    "user": "oolajide@hedgeserv.com",
+    "status": {
+      "state": {
+        "active": true,
+        "timestamp": "2025-06-17T17:54:21.642Z"
+      },
+      "actions": {
+        "comment_tickets": {
+          "ack": {
+            "timestamp": "2025-06-17T17:54:21.642Z",
+            "state": "awaits_successful_execution"
+          }
+        },
+        "open_tickets": {
+          "ack": {
+            "timestamp": "2025-06-17T17:54:21.642Z",
+            "state": "awaits_successful_execution"
+          }
+        }
+      },
+      "execution_state": "failed",
+      "version": -1
+    },
+    "trigger_event": {
+      "type": "manual",
+      "triggered_time": "2025-06-17T17:54:21.647Z",
+      "manual": {
+        "schedule": {
+          "scheduled_time": "2025-06-17T17:54:21.647Z"
         }
       }
-    ],
-    "type": "script_exception",
-    "reason": "compile error",
-    "script_stack": [
-      "...                Map<String, Long> successfulUpdateC ...",
-      "                             ^---- HERE"
-    ],
-    "script": """
+    },
+    "input": {
+      "chain": {
+        "inputs": [
+          {
+            "groups": {
+              "search": {
+                "request": {
+                  "search_type": "query_then_fetch",
+                  "indices": [
+                    "sdp_amdb"
+                  ],
+                  "rest_total_hits_as_int": true,
+                  "body": {
+                    "size": 0,
+                    "query": {
+                      "bool": {
+                        "filter": [
+                          {
+                            "bool": {
+                              "must_not": {
+                                "bool": {
+                                  "filter": [
+                                    {
+                                      "bool": {
+                                        "should": [
+                                          {
+                                            "range": {
+                                              "maintanace.utc_end": {
+                                                "gt": "now"
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "range": {
+                                              "maintanace.utc_start": {
+                                                "lt": "now"
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "minimum_should_match": 2
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "term": {
+                              "group": "{{ ctx.metadata.event_type }}"
+                            }
+                          },
+                          {
+                            "term": {
+                              "alert_status": "enabled"
+                            }
+                          },
+                          {
+                            "term": {
+                              "type": "server"
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "aggs": {
+                      "hosts": {
+                        "terms": {
+                          "field": "hostname.keyword",
+                          "size": 5000
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "groups_hosts": {
+              "transform": {
+                "script": {
+                  "source": """
+          // flatten the list of hostnames from sdp_amdb to use in the errors input
+          return ctx.payload.groups.aggregations.hosts.buckets.stream().map(b -> b.key).collect(Collectors.toList());""",
+                  "lang": "painless"
+                }
+              }
+            }
+          },
+          {
+            "errors": {
+              "search": {
+                "request": {
+                  "search_type": "query_then_fetch",
+                  "indices": [
+                    "prod:filebeat-*"
+                  ],
+                  "rest_total_hits_as_int": true,
+                  "template": {
+                    "source": """
+                    {
+                      "size": 0,
+                      "query": {
+                        "bool": {
+                          "filter": [
+                                {
+                                  "terms": {
+                                    "_tier": [
+                                      "data_hot",
+                                      "data_content"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "terms": {
+                                    "host.hostname": {{#toJson}}ctx.payload.groups_hosts._value{{/toJson}}
+                                  }
+                                },
+                                {
+                                  "range": {
+                                    "@timestamp": {
+                                      "gt": "now-{{ ctx.metadata.timeRangeValue }}{{ ctx.metadata.timeRangeUnit }}"
+                                    }
+                                  }
+                                },
+                                {
+                                  "exists": {
+                                    "field": "host.hostname"
+                                  }
+                                },
+                                {
+                                  "term": {
+                                    "log.file.path": "C:\\HedgeServ\\Logs\\HS_AWS_Auth_log.json"
+                                  }
+                                },
+                                {
+                                  "term": {
+                                    "service.name": "HS AWS Auth"
+                                  }
+                                },
+                                {
+                                  "match_phrase": {
+                                    "message": "Successfully updated the credentials"
+                                  }
+                                }
+                              ],
+                              "must_not": [
+                                {
+                                  "exists": {
+                                    "field": "cloud.account.id"
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          "aggs": {
+                            "hosts": {
+                              "terms": {
+                                "field": "host.hostname",
+                                "size": 5000
+                              }
+                            }
+                          }
+                        }
+                    """,
+                    "lang": "mustache"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "hosts": {
+              "transform": {
+                "script": {
+                  "source": """
                     // Get all hosts from sdp_amdb
                     def allHosts = ctx.payload.groups.aggregations.hosts.buckets.stream().map(b -> b.key).collect(Collectors.toSet());
 
                     // Get hosts that reported "Successfully updated the credentials" and their doc counts
-                    Map<String, Long> successfulUpdateCounts = new HashMap<>();
+                    def successfulUpdateCounts = new HashMap(); 
                     for (bucket in ctx.payload.errors.aggregations.hosts.buckets) {
                       successfulUpdateCounts.put(bucket.key, (long) bucket.successful_updates.doc_count);
                     }
 
                     // Identify hosts that have less than 2 successful updates OR are missing from the errors payload
-                    List<String> hostsToAlert = new ArrayList<>();
+                    List hostsToAlert = new ArrayList();
                     for (host in allHosts) {
                       // If the host is not in successfulUpdateCounts (meaning 0 messages) or the count is less than 2
-                      if (!successfulUpdateCounts.containsKey(host) || successfulUpdateCounts.get(host) < 2) {
+                      if (!successfulUpdateCounts.containsKey(host) || successfulUpdateCounts.get(host) < 5) {
                         hostsToAlert.add(host);
                       }
                     }
                     return hostsToAlert;
                     """,
-    "lang": "painless",
-    "position": {
-      "offset": 325,
-      "start": 300,
-      "end": 350
+                  "lang": "painless"
+                }
+              }
+            }
+          },
+          {
+            "open_tickets": {
+              "search": {
+                "request": {
+                  "search_type": "query_then_fetch",
+                  "indices": [
+                    "sdp_tickets"
+                  ],
+                  "rest_total_hits_as_int": true,
+                  "template": {
+                    "source": """
+                    {
+                      "size": 5000,
+                      "query": {
+                        "bool": {
+                          "filter": [
+                                {
+                                  "terms": {
+                                    "host.hostname": {{#toJson}}ctx.payload.hosts._value{{/toJson}}
+                                  }
+                                },
+                                {
+                                  "term": {
+                                    "status": "open"
+                                  }
+                                },
+                                {
+                                  "term": {
+                                    "event_type": "{{ ctx.metadata.event_type }}"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                    """,
+                    "lang": "mustache"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
     },
-    "caused_by": {
-      "type": "illegal_argument_exception",
-      "reason": "unexpected token [','] was expecting one of [{<EOF>, ';'}]."
-    }
-  },
-  "status": 400
+    "condition": {
+      "script": {
+        "source": """
+                // Alert if there are any hosts that need alerting (less than 2 successful updates)
+                return ctx.payload.hosts._value.size() > 0;
+            """,
+        "lang": "painless"
+      }
+    },
+    "metadata": {
+      "discover_link": "https://287d86a4b1184182b340bd5074cdfd7e.us-east-1.aws.found.io:9243/s/information-technology/app/r/s/MD29I",
+      "amdb_name": "13544 - HS AWS Auth Successfully updated the credentials < 2",
+      "ticket_priority": "2 - High",
+      "threshold": "Less than 2 entries of: 'Successfully updated the credentials' in the last 30 minutes",
+      "amdb_link": "https://hedgeservcorp.sharepoint.com/sites/GlobalTechnology/AMDB/SitePages/13544.aspx",
+      "ticket_item": "Service Down",
+      "timeRangeUnit": "m",
+      "event_type": "13544",
+      "ticket_group2": "Service Desk Operations",
+      "timeRangeValue": 30,
+      "ticket_group": "Monitoring and Analytics - Testing",
+      "ticket_subcategory": "Server Availability",
+      "id": "sdp_13544"
+    },
+    "result": {
+      "execution_time": "2025-06-17T17:54:21.647Z",
+      "execution_duration": 122,
+      "input": {
+        "type": "chain",
+        "status": "failure",
+        "error": {
+          "root_cause": [
+            {
+              "type": "null_pointer_exception",
+              "reason": """Cannot invoke "org.elasticsearch.xpack.core.watcher.watch.Payload.data()" because the return value of "org.elasticsearch.xpack.core.watcher.input.Input$Result.payload()" is null"""
+            }
+          ],
+          "type": "null_pointer_exception",
+          "reason": """Cannot invoke "org.elasticsearch.xpack.core.watcher.watch.Payload.data()" because the return value of "org.elasticsearch.xpack.core.watcher.input.Input$Result.payload()" is null"""
+        },
+        "chain": {}
+      },
+      "actions": []
+    },
+    "messages": [
+      "failed to execute watch input"
+    ]
+  }
 }
