@@ -1,0 +1,77 @@
+{
+  "error": {
+    "root_cause": [
+      {
+        "type": "script_exception",
+        "reason": "compile error",
+        "script_stack": [
+          "...                Map<String, Long> successfulUpdateC ...",
+          "                             ^---- HERE"
+        ],
+        "script": """
+                    // Get all hosts from sdp_amdb
+                    def allHosts = ctx.payload.groups.aggregations.hosts.buckets.stream().map(b -> b.key).collect(Collectors.toSet());
+
+                    // Get hosts that reported "Successfully updated the credentials" and their doc counts
+                    Map<String, Long> successfulUpdateCounts = new HashMap<>();
+                    for (bucket in ctx.payload.errors.aggregations.hosts.buckets) {
+                      successfulUpdateCounts.put(bucket.key, bucket.doc_count);
+                    }
+
+                    // Identify hosts that have less than 2 successful updates OR are missing from the errors payload
+                    List<String> hostsToAlert = new ArrayList<>();
+                    for (host in allHosts) {
+                      // If the host is not in successfulUpdateCounts (meaning 0 messages) or the count is less than 2
+                      if (!successfulUpdateCounts.containsKey(host) || successfulUpdateCounts.get(host) < 2) {
+                        hostsToAlert.add(host);
+                      }
+                    }
+                    return hostsToAlert;
+                    """,
+        "lang": "painless",
+        "position": {
+          "offset": 325,
+          "start": 300,
+          "end": 350
+        }
+      }
+    ],
+    "type": "script_exception",
+    "reason": "compile error",
+    "script_stack": [
+      "...                Map<String, Long> successfulUpdateC ...",
+      "                             ^---- HERE"
+    ],
+    "script": """
+                    // Get all hosts from sdp_amdb
+                    def allHosts = ctx.payload.groups.aggregations.hosts.buckets.stream().map(b -> b.key).collect(Collectors.toSet());
+
+                    // Get hosts that reported "Successfully updated the credentials" and their doc counts
+                    Map<String, Long> successfulUpdateCounts = new HashMap<>();
+                    for (bucket in ctx.payload.errors.aggregations.hosts.buckets) {
+                      successfulUpdateCounts.put(bucket.key, bucket.doc_count);
+                    }
+
+                    // Identify hosts that have less than 2 successful updates OR are missing from the errors payload
+                    List<String> hostsToAlert = new ArrayList<>();
+                    for (host in allHosts) {
+                      // If the host is not in successfulUpdateCounts (meaning 0 messages) or the count is less than 2
+                      if (!successfulUpdateCounts.containsKey(host) || successfulUpdateCounts.get(host) < 2) {
+                        hostsToAlert.add(host);
+                      }
+                    }
+                    return hostsToAlert;
+                    """,
+    "lang": "painless",
+    "position": {
+      "offset": 325,
+      "start": 300,
+      "end": 350
+    },
+    "caused_by": {
+      "type": "illegal_argument_exception",
+      "reason": "unexpected token [','] was expecting one of [{<EOF>, ';'}]."
+    }
+  },
+  "status": 400
+}
